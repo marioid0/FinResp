@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:liquid_pull_to_refresh/liquid_pull_to_refresh.dart';
 import 'package:curved_navigation_bar/curved_navigation_bar.dart';
-import 'package:fl_chart/fl_chart.dart';
 
 import '/auth/supabase_auth/auth_util.dart';
 import '/backend/supabase/supabase.dart';
@@ -11,11 +10,15 @@ import '/components/adicionar_registro_widget.dart';
 import '/components/editar_registro_widget.dart';
 import '/components/meu_perfil_widget.dart';
 import '/core/theme/app_theme.dart';
-import '/core/widgets/animated_counter.dart';
+import '/core/widgets/balance_card.dart';
+import '/core/widgets/enhanced_pie_chart.dart';
+import '/core/widgets/quick_actions_widget.dart';
+import '/core/widgets/transaction_summary_card.dart';
 import '/core/widgets/shimmer_loading.dart';
 import '/core/widgets/custom_error_widget.dart';
-import '/core/widgets/chart_widgets.dart';
+import '/core/widgets/transaction_category_icon.dart';
 import '/core/providers/dashboard_provider.dart';
+import '/core/utils/currency_formatter.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
 import 'home_page_model.dart';
@@ -65,8 +68,6 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
 
   @override
   Widget build(BuildContext context) {
-    final dashboardData = ref.watch(dashboardProvider);
-
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       body: LiquidPullToRefresh(
@@ -109,160 +110,82 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
   Widget _buildDashboardContent(DashboardData data) {
     return CustomScrollView(
       slivers: [
-        SliverAppBar(
-          expandedHeight: 120,
-          floating: true,
-          pinned: true,
-          backgroundColor: Colors.transparent,
-          flexibleSpace: FlexibleSpaceBar(
-            background: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Theme.of(context).colorScheme.primary,
-                    Theme.of(context).colorScheme.secondary,
+        SliverToBoxAdapter(
+          child: Column(
+            children: [
+              // Balance Card
+              BalanceCard(
+                totalBalance: data.totalBalance,
+                monthlyIncome: data.monthlyIncome,
+                monthlyExpenses: data.monthlyExpenses,
+              ),
+              
+              // Quick Actions
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: QuickActionsWidget(
+                  onTransactionAdded: () => ref.read(dashboardProvider.notifier).refresh(),
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Summary Cards
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TransactionSummaryCard(
+                        title: 'Receitas do Mês',
+                        amount: data.monthlyIncome,
+                        transactionCount: _getIncomeTransactionCount(data),
+                        icon: Icons.trending_up,
+                        color: AppTheme.successColor,
+                        topCategories: _getTopIncomeCategories(data),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TransactionSummaryCard(
+                        title: 'Gastos do Mês',
+                        amount: data.monthlyExpenses,
+                        transactionCount: _getExpenseTransactionCount(data),
+                        icon: Icons.trending_down,
+                        color: AppTheme.errorColor,
+                        topCategories: _getTopExpenseCategories(data),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Olá! 👋',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Seu saldo atual',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withOpacity(0.8),
-                        ),
-                      ),
-                      AnimatedCounter(
-                        value: data.totalBalance,
-                        prefix: 'R\$ ',
-                        textStyle: Theme.of(context).textTheme.displaySmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          actions: [
-            IconButton(
-              onPressed: () => showDialog(
-                context: context,
-                builder: (context) => const Dialog(
-                  child: MeuPerfilWidget(),
-                ),
-              ),
-              icon: const Icon(Icons.account_circle, color: Colors.white),
-            ),
-          ],
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.all(16),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate([
-              _buildMonthlyOverview(data),
+              
               const SizedBox(height: 16),
-              _buildExpenseChart(data),
+              
+              // Expense Chart
+              if (data.categoryExpenses.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildExpenseChart(data),
+                ),
+              
               const SizedBox(height: 16),
-              _buildRecentTransactions(data),
-            ]),
+              
+              // Recent Transactions
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildRecentTransactions(data),
+              ),
+              
+              const SizedBox(height: 100), // Space for FAB
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildMonthlyOverview(DashboardData data) {
-    return AnimationLimiter(
-      child: Row(
-        children: AnimationConfiguration.toStaggeredList(
-          duration: const Duration(milliseconds: 375),
-          childAnimationBuilder: (widget) => SlideAnimation(
-            horizontalOffset: 50.0,
-            child: FadeInAnimation(child: widget),
-          ),
-          children: [
-            Expanded(
-              child: _buildOverviewCard(
-                title: 'Receitas',
-                value: data.monthlyIncome,
-                icon: Icons.trending_up,
-                color: AppTheme.successColor,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildOverviewCard(
-                title: 'Gastos',
-                value: data.monthlyExpenses,
-                icon: Icons.trending_down,
-                color: AppTheme.errorColor,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOverviewCard({
-    required String title,
-    required double value,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: color, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            AnimatedCounter(
-              value: value,
-              prefix: 'R\$ ',
-              textStyle: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildExpenseChart(DashboardData data) {
-    if (data.categoryExpenses.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
     return Card(
       elevation: 2,
       child: Padding(
@@ -275,7 +198,7 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 16),
-            ExpensePieChart(
+            EnhancedPieChart(
               data: data.categoryExpenses,
               colors: const [
                 AppTheme.primaryColor,
@@ -285,52 +208,13 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
                 Colors.purple,
                 Colors.orange,
                 Colors.teal,
+                Colors.indigo,
+                Colors.pink,
               ],
             ),
-            const SizedBox(height: 16),
-            _buildChartLegend(data.categoryExpenses),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildChartLegend(Map<String, double> data) {
-    const colors = [
-      AppTheme.primaryColor,
-      AppTheme.secondaryColor,
-      AppTheme.errorColor,
-      AppTheme.warningColor,
-      Colors.purple,
-      Colors.orange,
-      Colors.teal,
-    ];
-
-    return Wrap(
-      spacing: 16,
-      runSpacing: 8,
-      children: data.entries.toList().asMap().entries.map((entry) {
-        final index = entry.key;
-        final mapEntry = entry.value;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                color: colors[index % colors.length],
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              mapEntry.key,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        );
-      }).toList(),
     );
   }
 
@@ -374,27 +258,41 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
   Widget _buildTransactionTile(RegistrosRow transaction) {
     final isIncome = transaction.tipo == 'Entrada';
     final color = isIncome ? AppTheme.successColor : AppTheme.errorColor;
-    final icon = isIncome ? Icons.add : Icons.remove;
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: color.withOpacity(0.1),
-        child: Icon(icon, color: color),
-      ),
-      title: Text(transaction.descricao ?? ''),
-      subtitle: Text(transaction.categoria ?? ''),
-      trailing: Text(
-        '${isIncome ? '+' : '-'}R\$ ${transaction.valor?.toStringAsFixed(2) ?? '0.00'}',
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.bold,
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: color.withOpacity(0.1),
+          child: TransactionCategoryIcon(
+            category: transaction.categoria ?? '',
+            color: color,
+          ),
         ),
-      ),
-      onTap: () => showDialog(
-        context: context,
-        builder: (context) => Dialog(
-          child: EditarRegistroWidget(registroRow: transaction),
+        title: Text(transaction.descricao ?? ''),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(transaction.categoria ?? ''),
+            Text(
+              dateTimeFormat('dd/MM/yyyy HH:mm', transaction.createdAt),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
         ),
+        trailing: Text(
+          '${isIncome ? '+' : '-'}${CurrencyFormatter.format(transaction.valor)}',
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        onTap: () => showDialog(
+          context: context,
+          builder: (context) => Dialog(
+            child: EditarRegistroWidget(registroRow: transaction),
+          ),
+        ).then((_) => ref.read(dashboardProvider.notifier).refresh()),
       ),
     );
   }
@@ -402,16 +300,12 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
   Widget _buildDashboardLoading() {
     return const CustomScrollView(
       slivers: [
-        SliverAppBar(
-          expandedHeight: 120,
-          backgroundColor: Colors.transparent,
-        ),
-        SliverPadding(
-          padding: EdgeInsets.all(16),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate([
+        SliverToBoxAdapter(
+          child: Column(
+            children: [
+              SizedBox(height: 16),
               ShimmerList(itemCount: 3),
-            ]),
+            ],
           ),
         ),
       ],
@@ -453,6 +347,14 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
               title: const Text('Transações'),
               floating: true,
               backgroundColor: Colors.transparent,
+              actions: [
+                IconButton(
+                  onPressed: () {
+                    // TODO: Implement filter/search
+                  },
+                  icon: const Icon(Icons.filter_list),
+                ),
+              ],
             ),
             SliverPadding(
               padding: const EdgeInsets.all(16),
@@ -483,7 +385,6 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
   Widget _buildTransactionCard(RegistrosRow transaction) {
     final isIncome = transaction.tipo == 'Entrada';
     final color = isIncome ? AppTheme.successColor : AppTheme.errorColor;
-    final icon = isIncome ? Icons.trending_up : Icons.trending_down;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -491,7 +392,10 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: color.withOpacity(0.1),
-          child: Icon(icon, color: color),
+          child: TransactionCategoryIcon(
+            category: transaction.categoria ?? '',
+            color: color,
+          ),
         ),
         title: Text(
           transaction.descricao ?? '',
@@ -502,13 +406,13 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
           children: [
             Text(transaction.categoria ?? ''),
             Text(
-              dateTimeFormat('dd/MM/yyyy', transaction.createdAt),
+              dateTimeFormat('dd/MM/yyyy HH:mm', transaction.createdAt),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),
         trailing: Text(
-          '${isIncome ? '+' : '-'}R\$ ${transaction.valor?.toStringAsFixed(2) ?? '0.00'}',
+          '${isIncome ? '+' : '-'}${CurrencyFormatter.format(transaction.valor)}',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             color: color,
             fontWeight: FontWeight.bold,
@@ -519,7 +423,7 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
           builder: (context) => Dialog(
             child: EditarRegistroWidget(registroRow: transaction),
           ),
-        ),
+        ).then((_) => ref.read(dashboardProvider.notifier).refresh()),
       ),
     );
   }
@@ -562,5 +466,50 @@ class _HomePageWidgetState extends ConsumerState<HomePageWidget>
       backgroundColor: Theme.of(context).colorScheme.secondary,
       child: const Icon(Icons.add, color: Colors.white),
     );
+  }
+
+  // Helper methods
+  int _getIncomeTransactionCount(DashboardData data) {
+    return data.recentTransactions
+        .where((t) => t.tipo == 'Entrada')
+        .length;
+  }
+
+  int _getExpenseTransactionCount(DashboardData data) {
+    return data.recentTransactions
+        .where((t) => t.tipo == 'Saída')
+        .length;
+  }
+
+  List<String> _getTopIncomeCategories(DashboardData data) {
+    final incomeByCategory = <String, double>{};
+    
+    for (final transaction in data.recentTransactions) {
+      if (transaction.tipo == 'Entrada' && transaction.categoria != null) {
+        incomeByCategory[transaction.categoria!] = 
+            (incomeByCategory[transaction.categoria!] ?? 0) + (transaction.valor ?? 0);
+      }
+    }
+    
+    final sortedCategories = incomeByCategory.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    
+    return sortedCategories.take(3).map((e) => e.key).toList();
+  }
+
+  List<String> _getTopExpenseCategories(DashboardData data) {
+    final expenseByCategory = <String, double>{};
+    
+    for (final transaction in data.recentTransactions) {
+      if (transaction.tipo == 'Saída' && transaction.categoria != null) {
+        expenseByCategory[transaction.categoria!] = 
+            (expenseByCategory[transaction.categoria!] ?? 0) + (transaction.valor ?? 0);
+      }
+    }
+    
+    final sortedCategories = expenseByCategory.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    
+    return sortedCategories.take(3).map((e) => e.key).toList();
   }
 }
